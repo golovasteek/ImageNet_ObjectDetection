@@ -33,10 +33,18 @@ class Object(object):
 
 
 class Annotation(object):
-    def __init__(self, path):
-        self.path = path
-
-        self.objects = []
+    def __init__(self, img_path, annotation_path):
+        self.path = img_path
+        with open(annotation_path) as f:
+            parsed = bs4.BeautifulSoup(f, 'lxml')
+        self.objects = [
+            Object(
+                int(obj.xmin.text), int(obj.ymin.text),
+                int(obj.xmax.text), int(obj.ymax.text),
+                obj.find("name").text.decode()
+            )
+            for obj in parsed.find_all("object")
+        ]
 
     def main_object(self):
         if not self.objects:
@@ -57,22 +65,11 @@ def read_annotations():
     for dir_path, _, file_names in os.walk(TRAIN_ANNOTATION_PATH):
         for fname in file_names:
             path = os.path.join(dir_path, fname)
-            with open(path) as f:
-                parsed = bs4.BeautifulSoup(f, 'lxml')
-                relpath = os.path.relpath(path, TRAIN_ANNOTATION_PATH)
-                img_path = os.path.splitext(os.path.join(TRAIN_DATA_PATH, relpath))[0] + '.JPEG'
-                if not os.path.exists(img_path):
-                    raise RuntimeError("Image {} not found on disk".format(img_path))
-                result = Annotation(img_path)
-                result.objects = [
-                    Object(
-                        int(obj.xmin.text), int(obj.ymin.text),
-                        int(obj.xmax.text), int(obj.ymax.text),
-                        obj.find("name").text.decode()
-                    )
-                    for obj in parsed.find_all("object")
-                ]
-                yield result
+            relpath = os.path.relpath(path, TRAIN_ANNOTATION_PATH)
+            img_path = os.path.splitext(os.path.join(TRAIN_DATA_PATH, relpath))[0] + '.JPEG'
+            if not os.path.exists(img_path):
+                raise RuntimeError("Image {} not found on disk".format(img_path))
+            yield Annotation(img_path, path)
 
 
 def get_desc(wnidx):
