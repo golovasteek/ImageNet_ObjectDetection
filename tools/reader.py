@@ -33,19 +33,10 @@ class Object(object):
 
 
 class Annotation(object):
-    def __init__(self, dir_name, file_name):
-        self.dir = dir_name
-        self.file = file_name
+    def __init__(self, path):
+        self.path = path
 
         self.objects = []
-
-    @property
-    def path(self):
-        return os.path.join(
-            TRAIN_DATA_PATH,
-            self.dir,
-            self.file + ".JPEG"
-        )
 
     def main_object(self):
         if not self.objects:
@@ -58,16 +49,21 @@ class Annotation(object):
 
     def __repr__(self):
         return "\n\t".join(
-            [os.path.join(self.dir, self.file)] +
+            [self.path] +
             [obj.__repr__() for obj in self.objects])
 
 
 def read_annotations():
     for dir_path, _, file_names in os.walk(TRAIN_ANNOTATION_PATH):
         for fname in file_names:
-            with open(os.path.join(dir_path, fname)) as f:
+            path = os.path.join(dir_path, fname)
+            with open(path) as f:
                 parsed = bs4.BeautifulSoup(f, 'lxml')
-                result = Annotation(parsed.annotation.folder.text, parsed.annotation.filename.text)
+                relpath = os.path.relpath(path, TRAIN_ANNOTATION_PATH)
+                img_path = os.path.splitext(os.path.join(TRAIN_DATA_PATH, relpath))[0] + '.JPEG'
+                if not os.path.exists(img_path):
+                    raise RuntimeError("Image {} not found on disk".format(img_path))
+                result = Annotation(img_path)
                 result.objects = [
                     Object(
                         int(obj.xmin.text), int(obj.ymin.text),
@@ -83,9 +79,12 @@ def get_desc(wnidx):
     if wnidx == "<background>":
         return "<backgroud>"
     if wnidx not in CACHE:
-        CACHE[wnidx] = " ".join(
-            requests.get(
-                "http://www.image-net.org/api/text/wordnet.synset.getwords?wnid={}".format(wnidx)).text.split())
+        url = "http://www.image-net.org/api/text/wordnet.synset.getwords?wnid={}".format(wnidx)
+        try:
+            CACHE[wnidx] = " ".join(requests.get(url).text.split())
+        except:
+            print "Failed to load url:", url
+            raise
     return CACHE[wnidx]
 
 

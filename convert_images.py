@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
@@ -14,14 +15,40 @@ def input_parser(file_name, labels):
     return image_parsed, labels
 
 
+BATCH_SIZE = 10
+
+def bytes_feature(val):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=val))
+
+def int_feature(val):
+    try:
+       if not isinstance(val, (tuple, list)):
+           val = [val]
+       return tf.train.Feature(int64_list=tf.train.Int64List(value=val))
+    except TypeError:
+        print val
+        raise
+
+def create_example(image, label):
+    return tf.train.Example(
+        features=tf.train.Features(feature={
+            "image": bytes_feature(image.tobytes()),
+            "height": int_feature(image.shape[0]),
+            "width": int_feature(image.shape[1]),
+            "label": bytes_feature(label.tobytes())
+        })
+    )
+
 if __name__ == "__main__":
     FILE = "one_biggest_3000.csv"
     data = pd.read_csv(FILE, index_col=0)
     dataset = tf.data.Dataset.from_tensor_slices((data.Image.as_matrix(), pd.get_dummies(data.class_id)))
-    iterator = dataset.make_one_shot_iterator()
-    next_elem = iterator.get_next()
+    dataset = dataset.map(input_parser)
+    dataset = dataset.batch(BATCH_SIZE)
 
-    img_label = input_parser(*next_elem)
+    iterator = dataset.make_one_shot_iterator()
+    img_label = iterator.get_next()
+
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -29,14 +56,12 @@ if __name__ == "__main__":
             pbar = tqdm(total=3000)
             while True:
                 try:
-                    img = sess.run(img_label)
-                    example = tf.train.Example(
-                        features=tf.train.Features(feature={
-                            "image": tf.train.Feature(
-                                bytes_list=tf.train.BytesList(value=img[0].tostring()))
-                        })
-                    )
-                    writer.write(example.SerializeToString())
+                    images = sess.run(img_label)
+
+                    for img, label in zip(images[0], images[1]):
+                        example = create_example(img, label)
+                        writer.write(example.SerializeToString()) 
                 except tf.errors.OutOfRangeError:
                     print "finished"
-                pbar.update(1)
+                    break
+                pbar.update(BATCH_SIZE)
