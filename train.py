@@ -2,9 +2,11 @@ import tensorflow as tf
 import os
 import functools
 import json
-from tools import reader
 import numpy as np
 
+from tqdm import tqdm
+from tools import reader
+from models import semi_alexnet_v1
 
 ANNOTATION_DIR = os.path.join("Annotations", "DET")
 IMAGES_DIR = os.path.join("Data", "DET")
@@ -21,9 +23,7 @@ def image_annotation_iterator(dataset_path, subset="train"):
     """
 
     annotations_root = os.path.join(dataset_path, ANNOTATION_DIR, subset)
-    print annotations_root
     images_root = os.path.join(dataset_path, IMAGES_DIR, subset)
-    print images_root
     for dir_path, _, file_names in os.walk(annotations_root):
         for annotation_file in file_names:
             path = os.path.join(dir_path, annotation_file)
@@ -45,12 +45,9 @@ def image_parser(file_name):
     return image_parsed
 
 
-if __name__ == "__main__":
-    with open("cat2id.json") as f:
-        cat2id = json.load(f)
-    print len(cat2id), "categories"
+def dataset_from_file_iterator(iter, cat2id, batch_size):
     file_dataset = tf.data.Dataset.from_generator(
-        functools.partial(image_annotation_iterator, "./ILSVRC"),
+        iter,
         output_types=(tf.string, tf.string),
         output_shapes=(tf.TensorShape([]), tf.TensorShape([]))
     )
@@ -64,21 +61,95 @@ if __name__ == "__main__":
 
     dataset = file_dataset.map(
         lambda img_file_tensor, ann_file_tensor:
-            (
-                image_parser(img_file_tensor),
-                tf.py_func(ann_file2one_hot, [ann_file_tensor], tf.float64)
-            )
+        (
+            image_parser(img_file_tensor),
+            tf.py_func(ann_file2one_hot, [ann_file_tensor], tf.float64)
+        )
     )
 
-    BATCH_SIZE = 16
-    dataset = dataset.batch(BATCH_SIZE)
-    dataset = dataset.prefetch(2)
+    dataset = dataset.take(1000)
 
-    iterator = dataset.make_one_shot_iterator()
-    next_elem = iterator.get_next()
-    print type(next_elem[0])
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(4)
+    return dataset
+
+
+BATCH_SIZE = 32
+
+
+if __name__ == "__main__":
+    with open("cat2id.json") as f:
+        cat2id = json.load(f)
+    print len(cat2id), "categories"
+
+    train_dataset = dataset_from_file_iterator(
+        functools.partial(image_annotation_iterator, "./ILSVRC", subset="train"),
+        cat2id,
+        BATCH_SIZE
+    )
+    valid_dataset = dataset_from_file_iterator(
+        functools.partial(image_annotation_iterator, "./ILSVRC", subset="val"),
+        cat2id,
+        BATCH_SIZE
+    )
+    iterator = tf.data.Iterator.from_structure(
+        train_dataset.output_types,
+        train_dataset.output_shapes
+    )
+
+    train_initializer_op = iterator.make_initializer(train_dataset)
+    valid_initializer_op = iterator.make_initializer(valid_dataset)
+
+    img_batch, label_batch = iterator.get_next()
+
+    logits = semi_alexnet_v1.semi_alexnet_v1(img_batch, len(cat2id) + 1)
+    loss = tf.losses.softmax_cross_entropy(
+        logits=logits, onehot_labels=label_batch)
+
+    labels = tf.argmax(label_batch, axis=1)
+    predictions = tf.argmax(logits, axis=1)
+
+    correct_predictions = tf.reduce_sum(tf.to_float(tf.equal(labels, predictions)))
+    optimizer = tf.train.AdamOptimizer().minimize(loss)
+
+    saver = tf.train.Saver()
+
+    EPOCHS = 10
     with tf.Session() as sess:
-        for i in range(3):
-            element = sess.run(next_elem)
-            print i, element[0].shape, element[1].shape
-    print "Success"
+        sess.run(tf.global_variables_initializer())
+        for epochs in range(EPOCHS):
+            counter = tqdm()
+            sess.run(train_initializer_op)
+            total = 0.
+            correct = 0.
+            try:
+                while True:
+                    opt, l, correct_batch = sess.run([optimizer, loss, correct_predictions])
+                    total += BATCH_SIZE
+                    correct += correct_batch
+                    counter.set_postfix({
+                        "loss": "{:.6}".format(l),
+                        "accuracy": correct/total
+                    })
+                    counter.update(BATCH_SIZE)
+            except tf.errors.OutOfRangeError:
+                print "Finished training"
+
+            counter = tqdm()
+            sess.run(valid_initializer_op)
+            total = 0.
+            correct = 0.
+            try:
+                while True:
+                    l, correct_batch = sess.run([loss, correct_predictions])
+                    total += BATCH_SIZE
+                    correct += correct_batch
+                    counter.set_postfix({
+                        "loss": "{:.6}".format(l),
+                        "valid accuracy": correct/total
+                    })
+                    counter.update(BATCH_SIZE)
+            except tf.errors.OutOfRangeError:
+                print "Finished validation"
+
+            saver.save(sess, "model/checkpoint_1")

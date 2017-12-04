@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def _semi_alexnet_v1(data, output_labels, is_training):
+def _semi_alexnet_v1(data, output_labels):
     conv = data
     conv = tf.layers.conv2d(
         inputs=conv,
