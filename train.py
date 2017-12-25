@@ -114,42 +114,44 @@ if __name__ == "__main__":
 
     saver = tf.train.Saver()
 
-    EPOCHS = 10
+    train_writer = tf.summary.FileWriter("./summary/" + "train", tf.get_default_graph())
+
+    EPOCHS = 1
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         for epochs in range(EPOCHS):
-            counter = tqdm()
-            sess.run(train_initializer_op)
-            total = 0.
-            correct = 0.
-            try:
-                while True:
-                    opt, l, correct_batch = sess.run([optimizer, loss, correct_predictions])
-                    total += BATCH_SIZE
-                    correct += correct_batch
-                    counter.set_postfix({
-                        "loss": "{:.6}".format(l),
-                        "accuracy": correct/total
-                    })
-                    counter.update(BATCH_SIZE)
-            except tf.errors.OutOfRangeError:
-                print "Finished training"
+            with tqdm() as counter:
+                sess.run(train_initializer_op)
+                total = 0.
+                correct = 0.
+                try:
+                    while True:
+                        opt, l, correct_batch = sess.run([optimizer, loss, correct_predictions])
+                        total += BATCH_SIZE
+                        correct += correct_batch
+                        counter.set_postfix({
+                            "loss": "{:.6}".format(l),
+                            "accuracy": correct/total
+                        })
+                        counter.update(BATCH_SIZE)
+                except tf.errors.OutOfRangeError:
+                    print "Finished training"
 
-            counter = tqdm()
-            sess.run(valid_initializer_op)
-            total = 0.
-            correct = 0.
-            try:
-                while True:
-                    l, correct_batch = sess.run([loss, correct_predictions])
-                    total += BATCH_SIZE
-                    correct += correct_batch
-                    counter.set_postfix({
-                        "loss": "{:.6}".format(l),
-                        "valid accuracy": correct/total
-                    })
-                    counter.update(BATCH_SIZE)
-            except tf.errors.OutOfRangeError:
-                print "Finished validation"
+            with tqdm() as counter:
+                sess.run(valid_initializer_op)
+                total = 0.
+                correct = 0.
+                try:
+                    while True:
+                        l, correct_batch = sess.run([loss, correct_predictions])
+                        total += BATCH_SIZE
+                        correct += correct_batch
+                        counter.set_postfix({
+                            "loss": "{:.6}".format(l),
+                            "valid accuracy": correct/total
+                        })
+                        counter.update(BATCH_SIZE)
+                except tf.errors.OutOfRangeError:
+                    print "Finished validation"
 
             saver.save(sess, "model/checkpoint_1")
